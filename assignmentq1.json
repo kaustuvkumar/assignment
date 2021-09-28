@@ -1,0 +1,898 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "VPC with Private Subnets in 2 AZs with internet & NAT gateways. Web, app & DB Ec2 instaces with autoscaling groups web, app & DB",
+  "Parameters": {
+    "envPrefix": {
+      "Description": "Environment name prefix. Format = env-app",
+      "Type": "String",
+      "Default": "env-app"
+    },
+
+    "vpcCidrClassB": {
+      "Description": "Class B CIDR of VPC, second octet (ex: 10.XXX.0.0/16).",
+      "Type": "Number",
+      "ConstraintDescription": "Must be in the range [0-255]",
+      "MinValue": "0",
+      "MaxValue": "255"
+    },
+
+    "CreateVPCflowlogsRole": {
+      "Type": "String",
+      "Description": "If this is the first time a VPC is being created in this account, select YES to create VPC Flow Logs Role. Select NO if a Role already exists for VPC Flow Logs.",
+      "AllowedValues": [ "YES", "NO"]
+    },
+
+    "subnet1AZ": {
+      "Description": "Subnet 1 Availability Zone. Choose different Availability Zones for Subnet 1 and Subnet 2.",
+      "Type": "AWS::EC2::AvailabilityZone::Name"
+    },
+    "subnet2AZ": {
+      "Description": "Subnet 2 Availability Zone. Choose different Availability Zones for Subnet 1 and Subnet 2.",
+      "Type": "AWS::EC2::AvailabilityZone::Name"
+    },
+
+    "groupName": {
+      "Type": "String",
+      "Description": "Enter the Group Name. This will be used to tag the AWS resources."
+    },
+    "ProjectName": {
+      "Type": "String",
+      "Description": "Enter the Group Name. This will be used to tag the AWS resources."
+    },
+
+    "InstanceType":{
+         "Description":"Select the required EC2 type for Web , app and DB server",
+         "Type":"String",
+         "Default":"t2.medium",
+         "ConstraintDescription":"must be a valid EC2 instance type."
+         "AllowedValues": [
+        "t2.micro", "t2.small", "t2.medium", "t2.large",
+        "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge",
+        "m4.large", "m4.xlarge", "m4.2xlarge", "m4.4xlarge", "m4.10xlarge", "r5.xlarge", r5.2xlarge]
+      },
+   "Mappings":{
+      "AWSRegionToAMI":{
+         "us-east-1":{
+            "AMIID":"ami-xxxxxxxxxxxxxx"
+         }
+         "eu-west-3":{
+            "AMIID":"ami-yyyyyyyyyyyyy"
+         }
+      }
+   },
+
+  "Conditions": {
+    "VPCFlowLogsRoleYES": {"Fn::Equals" : [{"Ref" : "CreateVPCflowlogsRole"}, "YES"]}
+  },
+
+  "Resources": {
+    "vpc": {
+      "Type": "AWS::EC2::VPC",
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Join": ["", ["10.",{"Ref": "vpcCidrClassB"},".0.","0", "/16"] ]
+        },
+        "InstanceTenancy": "default",
+        "EnableDnsSupport": "true",
+        "EnableDnsHostnames": "true",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {
+              "Fn::Join": ["-", [{"Ref": "envPrefix"}, "vpc"]]
+            }
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "vpcFlowLogsRole": {
+      "Type": "AWS::IAM::Role",
+      "Condition": "VPCFlowLogsRoleYES",
+      "Properties": {
+        "RoleName": "vpcFlowLogsRole",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "vpc-flow-logs.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "vpcFlowLogsPolicy",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                      "logs:CreateLogGroup",
+                      "logs:CreateLogStream",
+                      "logs:DescribeLogGroups",
+                      "logs:DescribeLogStreams",
+                      "logs:PutLogEvents"
+                  ],
+                  "Resource": "*"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+
+    "vpcFlowLogs" : {
+      "Type" : "AWS::EC2::FlowLog",
+      "Properties" : {
+        "DeliverLogsPermissionArn" : { "Fn::Sub": "arn:aws:iam::${AWS::AccountId}:role/vpcFlowLogsRole" },
+        "LogGroupName" : { "Fn::Join": ["-", [{"Ref": "envPrefix"}, "vpc", "flow", "logs"]] },
+        "ResourceId" : { "Ref" : "vpc" },
+        "ResourceType" : "VPC",
+        "TrafficType" : "ALL"
+      }
+    },
+
+    "privatewebSubnet1": {
+      "Type": "AWS::EC2::Subnet",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Join": ["", ["10.",{"Ref": "vpcCidrClassB"},".2.","0", "/24"] ]
+        },
+        "AvailabilityZone": {
+          "Ref": "subnet1AZ"
+        },
+        "VpcId": {
+          "Ref": "vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "privateweb-subnet-1"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+   "privateAppSubnet1": {
+      "Type": "AWS::EC2::Subnet",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Join": ["", ["10.",{"Ref": "vpcCidrClassB"},".7.","0", "/24"] ]
+        },
+        "AvailabilityZone": {
+          "Ref": "subnet1AZ"
+        },
+        "VpcId": {
+          "Ref": "vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "private-app-subnet-1"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+    "databaseSubnet1": {
+      "Type": "AWS::EC2::Subnet",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Join": ["", ["10.",{"Ref": "vpcCidrClassB"},".3.","0", "/24"] ]
+        },
+        "AvailabilityZone": {
+          "Ref": "subnet1AZ"
+        },
+        "VpcId": {
+          "Ref": "vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "database-subnet-1"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "privatewebSubnet2": {
+      "Type": "AWS::EC2::Subnet",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Join": ["", ["10.",{"Ref": "vpcCidrClassB"},".21.","0", "/24"] ]
+        },
+        "AvailabilityZone": {
+          "Ref": "subnet1AZ"
+        },
+        "VpcId": {
+          "Ref": "vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "privateweb-subnet-2"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "privateAppSubnet2": {
+      "Type": "AWS::EC2::Subnet",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Join": ["", ["10.",{"Ref": "vpcCidrClassB"},".71.","0", "/24"] ]
+        },
+        "AvailabilityZone": {
+          "Ref": "subnet2AZ"
+        },
+        "VpcId": {
+          "Ref": "vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "private-app-subnet-2"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "databaseSubnet2": {
+      "Type": "AWS::EC2::Subnet",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "CidrBlock": {
+          "Fn::Join": ["", ["10.",{"Ref": "vpcCidrClassB"},".30.","0", "/24"] ]
+        },
+        "AvailabilityZone": {
+          "Ref": "subnet2AZ"
+        },
+        "VpcId": {
+          "Ref": "vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "database-subnet-2"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "rtbPrivate": {
+      "Type": "AWS::EC2::RouteTable",
+      "DependsOn": ["vpc"],
+      "Properties": {
+        "VpcId": {
+          "Ref": "vpc"
+        },
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "rtb-private"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "routePrivate": {
+      "Type": "AWS::EC2::Route",
+      "DependsOn": ["rtbPrivate"],
+      "Properties": {
+        "DestinationCidrBlock": "0.0.0.0/0",
+        "NatGatewayId" : { "Ref" : "NAT" },
+        "RouteTableId": {
+          "Ref": "rtbPrivate"
+        }
+      }
+    },
+
+    "subnetRouteTableAssociationPrivate1": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "DependsOn": ["rtbPublic", "privatewebSubnet1"],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "rtbPrivate"
+        },
+        "SubnetId": {
+          "Ref": "privatewebSubnet1"
+        }
+      }
+    },
+
+    "subnetRouteTableAssociationPrivate2": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "DependsOn": ["rtbPublic", "privatewebSubnet2"],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "rtbPrivate"
+        },
+        "SubnetId": {
+          "Ref": "privatewebSubnet2"
+        }
+      }
+    },
+
+    "subnetRouteTableAssociationPrivate9": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "DependsOn": ["rtbPublic", "privateAppSubnet1"],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "rtbPrivate"
+        },
+        "SubnetId": {
+          "Ref": "privateAppSubnet1"
+        }
+      }
+    },
+
+    "subnetRouteTableAssociationPrivate10": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "DependsOn": ["rtbPublic", "privateAppSubnet2"],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "rtbPrivate"
+        },
+        "SubnetId": {
+          "Ref": "privateAppSubnet2"
+        }
+      }
+    },
+
+    "subnetRouteTableAssociationDBPrivate1": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "DependsOn": ["rtbPublic", "databaseSubnet1"],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "rtbPrivate"
+        },
+        "SubnetId": {
+          "Ref": "databaseSubnet1"
+        }
+      }
+    },
+
+    "subnetRouteTableAssociationDBPrivate2": {
+      "Type": "AWS::EC2::SubnetRouteTableAssociation",
+      "DependsOn": ["rtbPublic", "databaseSubnet2"],
+      "Properties": {
+        "RouteTableId": {
+          "Ref": "rtbPrivate"
+        },
+        "SubnetId": {
+          "Ref": "databaseSubnet2"
+        }
+      }
+    },
+
+    "NAT" : {
+      "DependsOn" : "attachGateway",
+      "Type" : "AWS::EC2::NatGateway",
+      "Properties" : {
+        "AllocationId" : { "Fn::GetAtt" : ["natEIP", "AllocationId"]},
+        "SubnetId" : { "Ref" : "publicSubnet1"},
+        "Tags" : [ 
+          {
+            "Key" : "Name",
+            "Value" : {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "nat"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "natEIP": {
+      "Type" : "AWS::EC2::EIP",
+      "Properties": {
+        "Domain" : "vpc"
+      }
+    },
+    "websg": {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "GroupName": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "web-sg"]]},
+        "GroupDescription" : "Security Group for Web. Traffic allowed on Port 443.",
+        "VpcId" : {"Ref" : "vpc"},
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": "443",
+            "ToPort": "443",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "SecurityGroupEgress": [
+          {
+            "IpProtocol": "-1",
+            "CidrIp": "0.0.0.0/0"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "web-sg"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+    "appsg": {
+      "Type" : "AWS::EC2::SecurityGroup",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "GroupName": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "app-sg"]]},
+        "GroupDescription": "Security Group for Application. Traffic allowed on port 443 from itself, 443 from websg, 22 from bastion.",
+        "VpcId" : {"Ref": "vpc"},
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "app-sg"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "appsgingressweb443": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "DependsOn": ["appsg", "websg"],
+      "Properties": {
+        "GroupId": { "Ref": "appsg" },
+        "IpProtocol": "tcp",
+        "FromPort": "443",
+        "ToPort": "443",
+        "SourceSecurityGroupId": { "Ref": "websg" }
+      }
+    },
+
+    "databasesg": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "DependsOn": ["vpc", "attachGateway"],
+      "Properties": {
+        "GroupName": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "database-sg"]]},
+        "GroupDescription": "Security Group for Database",
+        "VpcId": {"Ref": "vpc"},
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": {"Fn::Join": ["-", [{"Ref": "envPrefix"}, "database-sg"]]}
+          },
+          {
+            "Key" : "Group",
+            "Value" : {"Ref" : "groupName"}
+          },
+          {
+            "Key" : "Project",
+            "Value" : {"Ref" : "ProjectName"}
+          }
+        ]
+      }
+    },
+
+    "databasesgappingress": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "DependsOn": "databasesg",
+      "Properties": {
+        "GroupId": { "Ref": "databasesg" },
+        "IpProtocol": "tcp",
+        "FromPort": "1521",
+        "ToPort": "1521",
+        "SourceSecurityGroupId": { "Ref": "appsg" }
+      }
+    }
+  },
+  "LaunchConfigurationWeb":{
+         "Type":"AWS::AutoScaling::LaunchConfiguration",
+         "Properties":{
+            "AssociatePublicIpAddress":false,
+            "ImageId":{
+               "Fn::FindInMap":[
+                  "AWSRegionToAMI",
+                  {
+                     "Ref":"AWS::Region"
+                  },
+                  "AMIID"
+               ]
+            },
+            "SecurityGroups":[
+               {
+                  "Ref":"websg"
+               }
+            ],
+            "InstanceType":{
+               "Ref":"InstanceType"
+            },
+            "InstanceMonitoring":true,
+            "IamInstanceProfile":{
+               "Ref":"EC2InstanceProfile"
+            },
+            "BlockDeviceMappings":[
+               {
+                  "DeviceName":"/dev/sda1",
+                  "Ebs":{
+                     "VolumeSize":"50",
+                     "DeleteOnTermination":"false"
+                  }
+               }
+            ],
+            "LaunchConfigurationName":{
+               "Fn::Join":[
+                  "-",
+                  [
+                     {
+                        "Ref":"EnvPrefix"
+                     },
+                     "WEB"
+                  ]
+               ]
+            },
+            "KeyName":{
+               "Ref":"KeyName"
+            },
+            "UserData":{
+               "Fn::Base64":{
+                  "Fn::Join":[
+                     "",
+                     [
+                        "#!/bin/bash -xe \n",
+                        "yum -y update \n",
+                        "yum -y install awslogs \n"
+                     ]
+                  ]
+               }
+            }
+         }
+      },
+      "ASGML":{
+         "Type":"AWS::AutoScaling::AutoScalingGroup",
+         "Properties":{
+            "AutoScalingGroupName":{
+               "Fn::Join":[
+                  "-",
+                  [
+                     {
+                        "Ref":"EnvPrefix"
+                     },
+                     "WEBASG"
+                  ]
+               ]
+            },
+            "LaunchConfigurationName":{
+               "Ref":"LaunchConfigurationML"
+            },
+            "VPCZoneIdentifier":{
+               "Ref":"EC2SubnetId"
+            },
+            "MinSize":"2",
+            "DesiredCapacity":"2",
+            "MaxSize":"2",
+            "Tags":[
+               {
+                  "Key":"Name",
+                  "Value":{
+                     "Fn::Join":[
+                        "-",
+                        [
+                           {
+                              "Ref":"EnvPrefix"
+                           },
+                           "WEB"
+                        ]
+                     ]
+                  },
+                  "PropagateAtLaunch":"true"
+               }
+            ]
+         }
+      },
+  "LaunchConfigurationapp":{
+         "Type":"AWS::AutoScaling::LaunchConfiguration",
+         "Properties":{
+            "AssociatePublicIpAddress":false,
+            "ImageId":{
+               "Fn::FindInMap":[
+                  "AWSRegionToAMI",
+                  {
+                     "Ref":"AWS::Region"
+                  },
+                  "AMIID"
+               ]
+            },
+            "SecurityGroups":[
+               {
+                  "Ref":"appsg"
+               }
+            ],
+            "InstanceType":{
+               "Ref":"InstanceType"
+            },
+            "InstanceMonitoring":true,
+            "IamInstanceProfile":{
+               "Ref":"EC2InstanceProfile"
+            },
+            "BlockDeviceMappings":[
+               {
+                  "DeviceName":"/dev/sda1",
+                  "Ebs":{
+                     "VolumeSize":"50",
+                     "DeleteOnTermination":"false"
+                  }
+               }
+            ],
+            "LaunchConfigurationName":{
+               "Fn::Join":[
+                  "-",
+                  [
+                     {
+                        "Ref":"EnvPrefix"
+                     },
+                     "WEB"
+                  ]
+               ]
+            },
+            "KeyName":{
+               "Ref":"KeyName"
+            },
+            "UserData":{
+               "Fn::Base64":{
+                  "Fn::Join":[
+                     "",
+                     [
+                        "#!/bin/bash -xe \n",
+                        "yum -y update \n",
+                        "yum -y install awslogs \n"
+                     ]
+                  ]
+               }
+            }
+         }
+      },
+      "ASGAPP":{
+         "Type":"AWS::AutoScaling::AutoScalingGroup",
+         "Properties":{
+            "AutoScalingGroupName":{
+               "Fn::Join":[
+                  "-",
+                  [
+                     {
+                        "Ref":"EnvPrefix"
+                     },
+                     "APPASG"
+                  ]
+               ]
+            },
+            "LaunchConfigurationName":{
+               "Ref":"LaunchConfigurationapp"
+            },
+            "VPCZoneIdentifier":{
+               "Ref":"EC2SubnetId"
+            },
+            "MinSize":"2",
+            "DesiredCapacity":"2",
+            "MaxSize":"2",
+            "Tags":[
+               {
+                  "Key":"Name",
+                  "Value":{
+                     "Fn::Join":[
+                        "-",
+                        [
+                           {
+                              "Ref":"EnvPrefix"
+                           },
+                           "APP"
+                        ]
+                     ]
+                  },
+                  "PropagateAtLaunch":"true"
+               }
+            ]
+         }
+      }
+   }
+},
+  "LaunchConfigurationdb":{
+         "Type":"AWS::AutoScaling::LaunchConfiguration",
+         "Properties":{
+            "AssociatePublicIpAddress":false,
+            "ImageId":{
+               "Fn::FindInMap":[
+                  "AWSRegionToAMI",
+                  {
+                     "Ref":"AWS::Region"
+                  },
+                  "AMIID"
+               ]
+            },
+            "SecurityGroups":[
+               {
+                  "Ref":"databasesg"
+               }
+            ],
+            "InstanceType":{
+               "Ref":"InstanceType"
+            },
+            "InstanceMonitoring":true,
+            "IamInstanceProfile":{
+               "Ref":"EC2InstanceProfile"
+            },
+            "BlockDeviceMappings":[
+               {
+                  "DeviceName":"/dev/sda1",
+                  "Ebs":{
+                     "VolumeSize":"100",
+                     "DeleteOnTermination":"false"
+                  }
+               }
+            ],
+            "LaunchConfigurationName":{
+               "Fn::Join":[
+                  "-",
+                  [
+                     {
+                        "Ref":"EnvPrefix"
+                     },
+                     "DB"
+                  ]
+               ]
+            },
+            "KeyName":{
+               "Ref":"KeyName"
+            },
+            "UserData":{
+               "Fn::Base64":{
+                  "Fn::Join":[
+                     "",
+                     [
+                        "#!/bin/bash -xe \n",
+                        "yum -y update \n",
+                        "yum -y install awslogs \n"
+                     ]
+                  ]
+               }
+            }
+         }
+      },
+      "ASGDB":{
+         "Type":"AWS::AutoScaling::AutoScalingGroup",
+         "Properties":{
+            "AutoScalingGroupName":{
+               "Fn::Join":[
+                  "-",
+                  [
+                     {
+                        "Ref":"EnvPrefix"
+                     },
+                     "DBASG"
+                  ]
+               ]
+            },
+            "LaunchConfigurationName":{
+               "Ref":"LaunchConfigurationapp"
+            },
+            "VPCZoneIdentifier":{
+               "Ref":"EC2SubnetId"
+            },
+            "MinSize":"1",
+            "DesiredCapacity":"1",
+            "MaxSize":"1",
+            "Tags":[
+               {
+                  "Key":"Name",
+                  "Value":{
+                     "Fn::Join":[
+                        "-",
+                        [
+                           {
+                              "Ref":"EnvPrefix"
+                           },
+                           "DB"
+                        ]
+                     ]
+                  },
+                  "PropagateAtLaunch":"true"
+               }
+            ]
+         }
+      }
+   }
+}
+}
+}
+
