@@ -1,7 +1,8 @@
 # assignment
 
 #################################################################################################################################################################################
-Q1
+
+File name : assignmentq1.json
 
 Cloudformation template creates VPC with Private Subnets in 2 AZs 
 
@@ -14,12 +15,13 @@ Creates required security group websg, appsg & databasesg with ingress rules for
 For launching EC2 for web ,app and DB instance gives option to select the required EC2 instance type. Also created autoscaling group and launch configurations for the web ,app and DB layer to provide High Availibility.
 
 #################################################################################################################################################################################
-Q2
+
+
 
 
 
 #################################################################################################################################################################################
-Q3
+
 
 
 
