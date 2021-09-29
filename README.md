@@ -1,6 +1,7 @@
 # assignment
 
 ##################################################################################################
+
 Assignment 1
 
 File name : assignmentq1.json
@@ -16,6 +17,7 @@ Creates required security group websg, appsg & databasesg with ingress rules for
 For launching EC2 for web ,app and DB instance gives option to select the required EC2 instance type. Also created autoscaling group and launch configurations for the web ,app and DB layer to provide High Availibility.
 
 ####################################################################################################
+
 Assignment 2
 
 File name : meatadataquery.sh
