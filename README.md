@@ -16,7 +16,17 @@ Creates required security group websg, appsg & databasesg with ingress rules for
 For launching EC2 for web ,app and DB instance gives option to select the required EC2 instance type. Also created autoscaling group and launch configurations for the web ,app and DB layer to provide High Availibility.
 
 ####################################################################################################
+Assignment 2
+
+File name : meatadataquery.sh
+
+This a bash script to curl the metadata of ec2  (http://169.254.169.254/latest/dynamic/instance-identity/document)
+
+Input should be provided as the metatdata key that should be queries (i.e region ,accountId)
+
+
 ####################################################################################################
+
 Assignment 3
 
 File name: extractValue.py
